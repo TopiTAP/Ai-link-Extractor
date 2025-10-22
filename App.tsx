@@ -160,6 +160,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [copiedLink, setCopiedLink] = useState<string | null>(null);
   const [isAllCopied, setIsAllCopied] = useState(false);
+  const [duplicateCount, setDuplicateCount] = useState(0);
   
   // State for filters
   const [filterProtocol, setFilterProtocol] = useState('all'); // 'all', 'https', 'http'
@@ -251,6 +252,7 @@ export default function App() {
     setFilterKeyword('');
     setExcludeKeyword('');
     setFileName('extracted_links');
+    setDuplicateCount(0);
     if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
     if (allCopyTimeoutRef.current) clearTimeout(allCopyTimeoutRef.current);
   }, []);
@@ -268,34 +270,57 @@ export default function App() {
     setIsLoading(true);
     setError(null);
     setExtractedLinks([]);
+    setDuplicateCount(0);
     setFilterKeyword('');
     setExcludeKeyword('');
     setFilterProtocol('all');
 
     try {
       const stream = await extractLinksStream(inputText, apiKey);
-      let accumulatedText = '';
+      let buffer = '';
       const linksFound = new Set<string>();
+      let duplicatesFound = 0;
+
+      const processLine = (line: string) => {
+        if (line.startsWith('http://') || line.startsWith('https://')) {
+          try {
+            new URL(line); // Validate URL
+            const sizeBefore = linksFound.size;
+            linksFound.add(line);
+            if (linksFound.size === sizeBefore) {
+              duplicatesFound++;
+            }
+          } catch (e) {
+            // Ignore invalid URL lines
+          }
+        }
+      };
 
       for await (const chunk of stream) {
-        accumulatedText += chunk.text;
-        const potentialLinks = accumulatedText.split('\n');
+        buffer += chunk.text;
+        let newlineIndex;
+        const initialSize = linksFound.size;
         
-        potentialLinks.forEach(line => {
-          const trimmedLine = line.trim();
-          if (trimmedLine.startsWith('http://') || trimmedLine.startsWith('https://')) {
-            try {
-              new URL(trimmedLine);
-              linksFound.add(trimmedLine);
-            } catch (e) {
-              // Ignore invalid URL lines
-            }
-          }
-        });
-        setExtractedLinks(Array.from(linksFound));
+        while ((newlineIndex = buffer.indexOf('\n')) !== -1) {
+          const line = buffer.substring(0, newlineIndex).trim();
+          buffer = buffer.substring(newlineIndex + 1);
+          processLine(line);
+        }
+        
+        if (linksFound.size > initialSize) {
+            setExtractedLinks(Array.from(linksFound));
+        }
       }
       
-      if (linksFound.size === 0) {
+      if (buffer.trim()) {
+        processLine(buffer.trim());
+      }
+      
+      const finalLinks = Array.from(linksFound);
+      setExtractedLinks(finalLinks);
+      setDuplicateCount(duplicatesFound);
+      
+      if (finalLinks.length === 0) {
         setError("No links were found in the provided text.");
       }
 
@@ -378,9 +403,16 @@ export default function App() {
 
           <div className="mt-8">
             <div className="mb-4 border-b border-gray-800 pb-2">
-                <h2 className="text-xl font-semibold text-white mb-4">
-                 {resultTitle}
-                </h2>
+                <div className="flex justify-between items-center mb-4">
+                  <h2 className="text-xl font-semibold text-white">
+                  {resultTitle}
+                  </h2>
+                  {duplicateCount > 0 && !isLoading && !error && (
+                    <span className="text-sm text-green-400/80 bg-green-900/40 px-2.5 py-1 rounded-full border border-green-700/50">
+                      {duplicateCount} {duplicateCount === 1 ? 'duplicate' : 'duplicates'} removed
+                    </span>
+                  )}
+                </div>
                 {filteredLinks.length > 0 && (
                     <div className="flex flex-col sm:flex-row gap-4 items-center">
                         <div className="relative w-full sm:flex-1">
