@@ -1,0 +1,5 @@
+{
+  "name": "AI Link Extractor",
+  "description": "A low-latency web application that uses the Gemini API to instantly extract all URLs from a given block of text.",
+  "requestFramePermissions": []
+}
